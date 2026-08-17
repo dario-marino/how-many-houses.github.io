@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How Many Houses? | NYC &amp; Bay Area Neighborhood Housing Explorer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>How Many Houses?</h1>
+  <p class="subtitle">A neighborhood-level companion to "Building Houses, Yes, But How Many?" &mdash; New York City &amp; the Bay Area, by PUMA</p>
+</header>
+
+<main>
+  <div class="toggle-row">
+    <div id="city-toggle" class="toggle-group"></div>
+    <div id="metric-toggle" class="toggle-group"></div>
+  </div>
+  <div class="toggle-row">
+    <div id="section-toggle" class="toggle-group"></div>
+  </div>
+
+  <div class="panel">
+    <div id="sliders"></div>
+
+    <div class="viz-row">
+      <div id="map-container"></div>
+      <div id="legend"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>All neighborhoods (sortable)</h2>
+    <p class="desc">Click any column header to sort.</p>
+    <table id="data-table"></table>
+  </div>
+
+  <div class="caveat">
+    <strong>Methodology, in brief:</strong> for each PUMA (Census Public Use Microdata Area &mdash; the finest
+    geography at which household income and rent data are publicly available, roughly the size of a
+    community district), we start from current median rent or home value and current total housing units
+    (ACS 5-year estimates, 2019&ndash;2023). A constant-elasticity demand curve is fit through that single
+    observed point using an adjustable elasticity parameter (&minus;1.5 to &minus;0.5, spanning estimates in
+    the literature). <strong>Section 1</strong> asks how many additional units would be needed to reach a
+    price you choose. <strong>Section 2</strong> asks how many units are needed today to bring each PUMA to
+    a healthy (5&ndash;12%, adjustable) gross vacancy rate, and what price would result. Six high-cost Bay
+    Area PUMAs (parts of San Mateo and Santa Clara counties) have Census-topcoded home values at
+    $2,000,000&mdash;treat those estimates as a lower bound. This tool does not model cross-neighborhood
+    substitution (e.g. a renter priced out of one area moving to an adjacent one); each PUMA is evaluated
+    independently.
+    <div class="footer-links">
+      Data: U.S. Census Bureau ACS 5-Year Estimates &amp; TIGER/Line PUMA boundaries.
+    </div>
+  </div>
+</main>
+
+<div id="tooltip"></div>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="formulas.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
