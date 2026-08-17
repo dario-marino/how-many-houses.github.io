@@ -1,31 +1,47 @@
 /**
  * app.js
- * How Many Houses? -- a neighborhood-level (PUMA) housing shortage explorer
+ * How Many Houses? -- a neighborhood-level (PUMA) housing-price explorer
  * for NYC and the Bay Area, companion to "Building Houses, Yes, But How Many?"
  *
  * Data expected at:
  *   data/nyc_pumas_clean.geojson
  *   data/bayarea_pumas_clean.geojson
- * (produced by build_dataset.py)
  *
  * Depends on: d3 v7 (CDN), formulas.js (loaded before this file)
  */
 
-const DEFAULTS = {
-  elasticity: -1.0,     // slider range -1.5 (elastic) to -0.5 (inelastic)
-  benchmarkVacancy: 0.08, // 8% gross vacancy benchmark for Section 2
+// ------------------------------------------------------------------
+// HARDCODED FIXES / OVERRIDES
+// ------------------------------------------------------------------
+// One-off cosmetic corrections, keyed by puma_geoid (7-char Census GEOID
+// string). Add a new line here any time a naming issue shows up -- no
+// Python rerun needed, just edit this file and refresh.
+const NAME_OVERRIDES = {
+  "3604501": "North Shore (Staten Island CD 1)",
+  "3604502": "Mid-Island (Staten Island CD 2)",
+  "3604503": "South Shore (Staten Island CD 3)",
 };
 
+function applyOverrides(features) {
+  features.forEach((f) => {
+    const geoid = String(f.properties.puma_geoid);
+    if (NAME_OVERRIDES[geoid]) {
+      f.properties.display = NAME_OVERRIDES[geoid];
+    }
+  });
+}
+
+// ------------------------------------------------------------------
+// State
+// ------------------------------------------------------------------
 const state = {
-  city: "nyc",              // "nyc" | "bayarea"
-  metric: "rent",           // "rent" | "price"
-  section: 1,                // 1 | 2
-  elasticity: DEFAULTS.elasticity,
-  benchmarkVacancy: DEFAULTS.benchmarkVacancy,
-  targetPrice: null,         // set once data loads, per city+metric
+  city: "nyc",         // "nyc" | "bayarea"
+  metric: "rent",      // "rent" | "price"
+  elasticity: -1.0,     // -1.5 (elastic) to -0.5 (inelastic), 0.1 steps
+  targetPrice: null,    // set per city+metric once data loads
   sortKey: null,
   sortAsc: false,
-  data: { nyc: null, bayarea: null }, // geojson FeatureCollections
+  data: { nyc: null, bayarea: null },
 };
 
 const METRIC_FIELD = {
@@ -41,6 +57,8 @@ async function loadData() {
     fetch("data/nyc_pumas_clean.geojson").then((r) => r.json()),
     fetch("data/bayarea_pumas_clean.geojson").then((r) => r.json()),
   ]);
+  applyOverrides(nyc.features);
+  applyOverrides(bayarea.features);
   state.data.nyc = nyc;
   state.data.bayarea = bayarea;
 }
@@ -64,22 +82,13 @@ function computeForFeature(props) {
   const field = METRIC_FIELD[state.metric];
   const currentPrice = props[field.current];
   const currentUnits = props.total_housing_units;
-  const occupiedUnits = props.occupied_units;
 
-  if (state.section === 1) {
-    const unitsRaw = unitsToReachTargetPrice(
-      currentPrice, currentUnits, state.targetPrice, state.elasticity
-    );
-    const unitsToBuild = unitsRaw === null ? null : Math.max(0, unitsRaw);
-    const pct = unitsRaw === null ? null : pctChange(currentUnits, currentUnits + unitsRaw);
-    return { primary: unitsToBuild, pct, currentPrice, currentUnits };
-  } else {
-    const { shortageUnits, resultingPrice } = shortageAndResultingPrice(
-      currentPrice, currentUnits, occupiedUnits, state.benchmarkVacancy, state.elasticity
-    );
-    const pct = resultingPrice === null ? null : pctChange(currentPrice, resultingPrice);
-    return { primary: shortageUnits, resultingPrice, pct, currentPrice, currentUnits };
-  }
+  const unitsRaw = unitsToReachTargetPrice(
+    currentPrice, currentUnits, state.targetPrice, state.elasticity
+  );
+  const unitsToBuild = unitsRaw === null ? null : Math.max(0, unitsRaw);
+  const pct = unitsRaw === null ? null : pctChange(currentUnits, currentUnits + unitsRaw);
+  return { unitsToBuild, pct, currentPrice, currentUnits };
 }
 
 // ------------------------------------------------------------------
@@ -97,6 +106,11 @@ function renderToggle(containerId, options, activeKey, onSelect) {
   });
 }
 
+// Called ONLY on structural changes (city/metric switch, or initial load).
+// This is the only place that should ever rebuild the slider DOM -- never
+// call this from a slider's own oninput handler, or dragging breaks (the
+// browser cancels a drag gesture if the element under the pointer gets
+// replaced mid-drag).
 function refreshControls() {
   renderToggle("city-toggle", [
     { key: "nyc", label: "New York City" },
@@ -108,60 +122,61 @@ function refreshControls() {
     { key: "price", label: "Home Price" },
   ], state.metric, (key) => { state.metric = key; onCityOrMetricChange(); });
 
-  renderToggle("section-toggle", [
-    { key: 1, label: "1. Units needed at a target price" },
-    { key: 2, label: "2. Today's shortage" },
-  ], state.section, (key) => { state.section = key; renderAll(); });
-
   renderSliders();
 }
 
 function onCityOrMetricChange() {
   const field = METRIC_FIELD[state.metric];
   const [lo, hi] = priceBounds(currentFeatures(), field.current);
-  // default target = current metro median-ish (midpoint of bounds), clamped
   state.targetPrice = Math.round((lo + hi) / 2);
   refreshControls();
-  renderAll();
+  renderMap();
+  renderTable();
 }
 
+// Builds the slider DOM. Called only from refreshControls() (structural),
+// never from a slider's own oninput.
 function renderSliders() {
   const container = document.getElementById("sliders");
   container.innerHTML = "";
 
   const field = METRIC_FIELD[state.metric];
+  const [lo, hi] = priceBounds(currentFeatures(), field.current);
+  const sliderMin = Math.round(lo * 0.5);
+  const sliderMax = Math.round(hi * 1.5);
+  if (state.targetPrice === null) state.targetPrice = Math.round((lo + hi) / 2);
 
-  if (state.section === 1) {
-    const [lo, hi] = priceBounds(currentFeatures(), field.current);
-    const sliderMin = Math.round(lo * 0.5);
-    const sliderMax = Math.round(hi * 1.5);
-    if (state.targetPrice === null) state.targetPrice = Math.round((lo + hi) / 2);
-
-    addSlider(container, {
-      label: `Target ${field.label.toLowerCase()}`,
-      min: sliderMin, max: sliderMax,
-      step: state.metric === "rent" ? 10 : 5000,
-      value: state.targetPrice,
-      format: (v) => "$" + Math.round(v).toLocaleString(),
-      onInput: (v) => { state.targetPrice = v; renderAll(); },
-    });
-  } else {
-    addSlider(container, {
-      label: "Benchmark healthy vacancy rate",
-      min: 0.05, max: 0.12, step: 0.01,
-      value: state.benchmarkVacancy,
-      format: (v) => (v * 100).toFixed(0) + "%",
-      onInput: (v) => { state.benchmarkVacancy = v; renderAll(); },
-    });
-  }
+  addSlider(container, {
+    label: `Target ${field.label.toLowerCase()}`,
+    min: sliderMin,
+    max: sliderMax,
+    step: state.metric === "rent" ? 10 : 1000,
+    value: state.targetPrice,
+    format: (v) => "$" + Math.round(v).toLocaleString(),
+    // IMPORTANT: only repaint the map/table on input -- never rebuild
+    // the sliders themselves, or dragging will break.
+    onInput: (v) => { state.targetPrice = v; renderMap(); renderTable(); },
+  });
 
   addSlider(container, {
     label: "Elasticity of demand (\u03B5)",
-    min: -1.5, max: -0.5, step: 0.05,
+    min: -1.5,
+    max: -0.5,
+    step: 0.1,
     value: state.elasticity,
-    format: (v) => v.toFixed(2),
-    onInput: (v) => { state.elasticity = v; renderAll(); },
+    format: (v) => v.toFixed(1),
+    onInput: (v) => { state.elasticity = v; renderMap(); renderTable(); },
   });
+
+  const note = document.createElement("p");
+  note.className = "desc";
+  note.style.marginTop = "-0.5rem";
+  note.innerHTML =
+    "Smaller \u03B5 means demand is more price sensitive: reaching a lower price target " +
+    "requires a big increase in units, because more renters will come in. A less negative " +
+    "\u03B5 means demand is less sensitive: the same price target needs a smaller change in " +
+    "stock. A value between \u22121.5 and \u22120.5 is in line with the literature.";
+  container.appendChild(note);
 }
 
 function addSlider(container, { label, min, max, step, value, format, onInput }) {
@@ -178,7 +193,14 @@ function addSlider(container, { label, min, max, step, value, format, onInput })
 
   const input = document.createElement("input");
   input.type = "range";
-  input.min = min; input.max = max; input.step = step; input.value = value;
+  input.min = min;
+  input.max = max;
+  input.step = step;
+  input.value = value;
+  // This handler ONLY updates state + the label text + repaints the map
+  // and table. It never touches the slider's own DOM node, so both
+  // click-to-jump and click-and-drag work exactly like a normal
+  // <input type="range">.
   input.oninput = () => {
     const v = parseFloat(input.value);
     spanVal.textContent = format(v);
@@ -225,7 +247,7 @@ function renderMap() {
   projection.fitSize([width - 10, height - 10], fc);
 
   const computed = features.map((f) => computeForFeature(f.properties));
-  const values = computed.map((c) => c.primary);
+  const values = computed.map((c) => c.unitsToBuild);
   const color = colorScaleFor(values);
 
   const sel = svg.selectAll("path.puma-path").data(features, (d) => d.properties.puma_geoid);
@@ -251,21 +273,11 @@ function showTooltip(event, feature) {
   const c = computeForFeature(props);
   const field = METRIC_FIELD[state.metric];
 
-  let rows = "";
-  if (state.section === 1) {
-    rows = `
-      <div class="t-row"><span>Current ${field.label.toLowerCase()}</span><span>${props[field.display]}</span></div>
-      <div class="t-row"><span>Current units</span><span>${props.total_housing_units.toLocaleString()}</span></div>
-      <div class="t-row"><span>Units to build</span><span>${c.primary === null ? "n/a" : Math.round(c.primary).toLocaleString()}</span></div>
-    `;
-  } else {
-    rows = `
-      <div class="t-row"><span>Current ${field.label.toLowerCase()}</span><span>${props[field.display]}</span></div>
-      <div class="t-row"><span>Vacancy rate</span><span>${(props.vacancy_rate * 100).toFixed(1)}%</span></div>
-      <div class="t-row"><span>Shortage (units)</span><span>${c.primary === null ? "n/a" : Math.round(c.primary).toLocaleString()}</span></div>
-      <div class="t-row"><span>Price if closed</span><span>${c.resultingPrice === null ? "n/a" : "$" + Math.round(c.resultingPrice).toLocaleString()}</span></div>
-    `;
-  }
+  const rows = `
+    <div class="t-row"><span>Current ${field.label.toLowerCase()}</span><span>${props[field.display]}</span></div>
+    <div class="t-row"><span>Current units</span><span>${props.total_housing_units.toLocaleString()}</span></div>
+    <div class="t-row"><span>Units to build</span><span>${c.unitsToBuild === null ? "n/a" : Math.round(c.unitsToBuild).toLocaleString()}</span></div>
+  `;
 
   tooltipEl.innerHTML = `<div class="t-title">${props.display}</div>${rows}`;
   tooltipEl.style.left = (event.clientX + 16) + "px";
@@ -283,16 +295,12 @@ function renderLegend(color, values) {
   const stops = d3.range(0, 1.01, 0.1).map((t) => color(t * max));
   const gradientCss = `linear-gradient(to right, ${stops.join(",")})`;
 
-  const title = state.section === 1 ? "Units to build" : "Unit shortage";
-
   legend.innerHTML = `
-    <h3>${title}</h3>
+    <h3>Units to build</h3>
     <div class="legend-gradient" style="background:${gradientCss}"></div>
     <div class="legend-labels"><span>0</span><span>${Math.round(max).toLocaleString()}</span></div>
     <div class="legend-note">
-      ${state.section === 1
-        ? "Darker = more new units needed in that PUMA to hit the target price you've set, at the chosen elasticity."
-        : "Darker = larger gap between current housing stock and a healthy (" + (state.benchmarkVacancy*100).toFixed(0) + "%) vacancy rate."}
+      Darker = more new units needed in that PUMA to hit the target price you've set, at the chosen elasticity.
     </div>
   `;
 }
@@ -311,31 +319,20 @@ function renderTable() {
       currentPrice: f.properties[field.current],
       currentPriceDisplay: f.properties[field.display],
       units: f.properties.total_housing_units,
-      vacancy: f.properties.vacancy_rate,
-      primary: c.primary,
-      resultingPrice: c.resultingPrice,
+      unitsToBuild: c.unitsToBuild,
       pct: c.pct,
     };
   });
 
-  const columns = state.section === 1
-    ? [
-        { key: "name", label: "Neighborhood (PUMA)", sortable: true, type: "str" },
-        { key: "currentPriceDisplay", sortKey: "currentPrice", label: `Current ${field.label}`, sortable: true, type: "num" },
-        { key: "units", label: "Current Units", sortable: true, type: "num", fmt: (v) => v.toLocaleString() },
-        { key: "primary", label: "Units to Build", sortable: true, type: "num", fmt: (v) => v === null ? "n/a" : Math.round(v).toLocaleString() },
-        { key: "pct", label: "% Change in Stock", sortable: true, type: "num", fmt: (v) => v === null ? "n/a" : v.toFixed(1) + "%" },
-      ]
-    : [
-        { key: "name", label: "Neighborhood (PUMA)", sortable: true, type: "str" },
-        { key: "currentPriceDisplay", sortKey: "currentPrice", label: `Current ${field.label}`, sortable: true, type: "num" },
-        { key: "vacancy", label: "Vacancy Rate", sortable: true, type: "num", fmt: (v) => (v * 100).toFixed(1) + "%" },
-        { key: "primary", label: "Shortage (Units)", sortable: true, type: "num", fmt: (v) => v === null ? "n/a" : Math.round(v).toLocaleString() },
-        { key: "resultingPrice", label: "Price if Closed", sortable: true, type: "num", fmt: (v) => v === null ? "n/a" : "$" + Math.round(v).toLocaleString() },
-      ];
+  const columns = [
+    { key: "name", label: "Neighborhood (PUMA)", type: "str" },
+    { key: "currentPriceDisplay", sortKey: "currentPrice", label: `Current ${field.label}`, type: "num" },
+    { key: "units", label: "Current Units", type: "num", fmt: (v) => v.toLocaleString() },
+    { key: "unitsToBuild", label: "Units to Build", type: "num", fmt: (v) => v === null ? "n/a" : Math.round(v).toLocaleString() },
+    { key: "pct", label: "% Change in Stock", type: "num", fmt: (v) => v === null ? "n/a" : v.toFixed(1) + "%" },
+  ];
 
   if (state.sortKey) {
-    const col = columns.find((c) => (c.sortKey || c.key) === state.sortKey);
     rows.sort((a, b) => {
       const ak = a[state.sortKey], bk = b[state.sortKey];
       if (ak === null) return 1;
@@ -376,16 +373,10 @@ function renderTable() {
 // ------------------------------------------------------------------
 // Main
 // ------------------------------------------------------------------
-function renderAll() {
-  renderSliders();
-  renderMap();
-  renderTable();
-}
-
 async function main() {
   initMap();
   await loadData();
-  onCityOrMetricChange(); // sets targetPrice + triggers refreshControls + renderAll
+  onCityOrMetricChange(); // sets targetPrice + builds controls + renders map/table
 }
 
 document.addEventListener("DOMContentLoaded", main);
