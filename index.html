@@ -10,16 +10,13 @@
 
 <header>
   <h1>How Many Houses?</h1>
-  <p class="subtitle">A neighborhood-level companion to "Building Houses, Yes, But How Many?" &mdash; New York City &amp; the Bay Area, by PUMA</p>
+  <p class="subtitle">A neighborhood-level companion to "Building Houses, Yes, But How Many?" &mdash; New York City &amp; the Bay Area, by ZIP code</p>
 </header>
 
 <main>
   <div class="toggle-row">
     <div id="city-toggle" class="toggle-group"></div>
     <div id="metric-toggle" class="toggle-group"></div>
-  </div>
-  <div class="toggle-row">
-    <div id="section-toggle" class="toggle-group"></div>
   </div>
 
   <div class="panel">
@@ -38,20 +35,23 @@
   </div>
 
   <div class="caveat">
-    <strong>Methodology, in brief:</strong> for each PUMA (Census Public Use Microdata Area &mdash; the finest
-    geography at which household income and rent data are publicly available, roughly the size of a
-    community district), we start from current median rent or home value and current total housing units
-    (ACS 5-year estimates, 2019&ndash;2023). A constant-elasticity demand curve is fit through that single
-    observed point using an adjustable elasticity parameter (&minus;1.5 to &minus;0.5, spanning estimates in
-    the literature). <strong>Section 1</strong> asks how many additional units would be needed to reach a
-    price you choose. <strong>Section 2</strong> asks how many units are needed today to bring each PUMA to
-    a healthy (5&ndash;12%, adjustable) gross vacancy rate, and what price would result. Six high-cost Bay
-    Area PUMAs (parts of San Mateo and Santa Clara counties) have Census-topcoded home values at
-    $2,000,000&mdash;treat those estimates as a lower bound. This tool does not model cross-neighborhood
-    substitution (e.g. a renter priced out of one area moving to an adjacent one); each PUMA is evaluated
-    independently.
+    <strong>Methodology, in brief:</strong> for each ZIP code (ZCTA) in New York City and the 9-county Bay
+    Area, we start from a current market price and current total housing units, then fit a
+    constant-elasticity demand curve through that single observed point using an adjustable elasticity
+    parameter (&minus;1.5 to &minus;0.5, spanning estimates in the literature). Set a target price and the
+    tool shows how many additional units each ZIP would need to reach it, at your chosen elasticity.
+    <br><br>
+    <strong>Data sources:</strong> price comes from Zillow's ZHVI (home value) and ZORI (rent) indices,
+    both updated monthly and based on current listings/asking prices &mdash; not a blend with older,
+    long-standing leases. Housing unit counts come from the U.S. Census Bureau's ACS 5-year estimates
+    (2019&ndash;2023), the most current source for unit counts at this geography; unit counts move slowly,
+    so this lag matters less than it would for price. A small number of low-sample ZIP codes are suppressed
+    by Zillow and will show as "n/a."
+    <br><br>
+    This tool does not model cross-neighborhood substitution (e.g. a renter priced out of one ZIP moving to
+    an adjacent one); each ZIP is evaluated independently.
     <div class="footer-links">
-      Data: U.S. Census Bureau ACS 5-Year Estimates &amp; TIGER/Line PUMA boundaries.
+      Data: Zillow Research (ZHVI, ZORI) &amp; U.S. Census Bureau ACS 5-Year Estimates and TIGER/Line ZCTA boundaries.
     </div>
   </div>
 </main>
