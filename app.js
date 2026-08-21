@@ -36,7 +36,7 @@ const state = {
   targetPrice: null,
   sortKey: null,
   sortAsc: false,
-  data: { nyc: null, bayarea: null },
+  data: { nyc: null, bayarea: null }, // each holds .features, ._centroids, ._adjacency
 };
 
 const METRIC_FIELD = {
@@ -57,10 +57,25 @@ async function loadData() {
   applyOverrides(bayarea.features);
   state.data.nyc = nyc;
   state.data.bayarea = bayarea;
+
+  // Precompute each city's neighbor graph (K nearest ZIPs by centroid)
+  // once at load time -- this defines WHO can pass demand to whom, using
+  // d3.geoCentroid on the already-loaded polygon geometry. No new data
+  // file or Python rerun needed. See formulas.js for why this is safe
+  // (doesn't double-count distance the way an earlier, removed version did).
+  [state.data.nyc, state.data.bayarea].forEach((fc) => {
+    if (!fc) return;
+    fc._centroids = fc.features.map((f) => d3.geoCentroid(f));
+    fc._adjacency = buildKNearestNeighbors(fc._centroids);
+  });
+}
+
+function currentFeatureCollection() {
+  return state.data[state.city];
 }
 
 function currentFeatures() {
-  const fc = state.data[state.city];
+  const fc = currentFeatureCollection();
   return fc ? fc.features : [];
 }
 
@@ -106,7 +121,15 @@ function computeAllValues(features) {
   const naiveUnitsArray = naiveResults.map((r) => r.unitsToBuild);
   const elasticityArray = features.map((f) => f.properties.supply_elasticity);
 
-  const reallocated = reallocateBySupplyElasticity(naiveUnitsArray, elasticityArray);
+  const fc = currentFeatureCollection();
+  const adjacency = fc && fc._adjacency;
+
+  let reallocated;
+  if (adjacency) {
+    reallocated = solveEquilibriumReallocation(naiveUnitsArray, elasticityArray, adjacency);
+  } else {
+    reallocated = naiveUnitsArray.map((v) => (v === null || v === undefined || isNaN(v)) ? 0 : Math.max(0, v));
+  }
 
   const values = features.map((f, i) => ({
     naive: naiveResults[i],
@@ -357,7 +380,7 @@ function renderLegend(color, values) {
     ? "Units to build (with substitution)"
     : "Units to build (independent)";
   const modeNote = state.model === "substitution"
-    ? "Same metro-wide total as the independent model, but redistributed toward neighborhoods where building is easier (per Baum-Snow &amp; Han, 2024)."
+    ? "Same metro-wide total as the independent model, but redistributed via a recursive neighbor-to-neighbor cascade based on each ZIP's supply elasticity (per Baum-Snow &amp; Han, 2024)."
     : "Each neighborhood treated as if it had to meet demand entirely on its own, with no spillover to or from nearby areas.";
 
   legend.innerHTML = `
