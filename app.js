@@ -33,11 +33,6 @@ const state = {
   metric: "rent",
   model: "substitution",  // "independent" | "substitution"
   elasticity: -1.0,        // demand elasticity
-  // NOTE: spillover distance is NOT user-adjustable -- it's hardcoded in
-  // formulas.js as SPILLOVER_DECAY_KM (currently 0.805 km = 805 meters).
-  // See that file's header comment for the empirical grounding.
-  // reallocateWithDistanceDecay() falls back to that constant
-  // automatically if no decayKm is passed.
   targetPrice: null,
   sortKey: null,
   sortAsc: false,
@@ -62,20 +57,10 @@ async function loadData() {
   applyOverrides(bayarea.features);
   state.data.nyc = nyc;
   state.data.bayarea = bayarea;
-
-  [state.data.nyc, state.data.bayarea].forEach((fc) => {
-    if (!fc) return;
-    fc._centroids = fc.features.map((f) => d3.geoCentroid(f));
-    fc._distanceMatrix = buildDistanceMatrixKm(fc._centroids);
-  });
-}
-
-function currentFeatureCollection() {
-  return state.data[state.city];
 }
 
 function currentFeatures() {
-  const fc = currentFeatureCollection();
+  const fc = state.data[state.city];
   return fc ? fc.features : [];
 }
 
@@ -121,17 +106,7 @@ function computeAllValues(features) {
   const naiveUnitsArray = naiveResults.map((r) => r.unitsToBuild);
   const elasticityArray = features.map((f) => f.properties.supply_elasticity);
 
-  const fc = currentFeatureCollection();
-  const distanceMatrix = fc && fc._distanceMatrix;
-
-  let reallocated;
-  if (distanceMatrix) {
-    // decayKm intentionally omitted -- reallocateWithDistanceDecay() falls
-    // back to the hardcoded SPILLOVER_DECAY_KM constant from formulas.js.
-    reallocated = reallocateWithDistanceDecay(naiveUnitsArray, elasticityArray, distanceMatrix);
-  } else {
-    reallocated = naiveUnitsArray.map((v) => (v === null || v === undefined || isNaN(v)) ? 0 : Math.max(0, v));
-  }
+  const reallocated = reallocateBySupplyElasticity(naiveUnitsArray, elasticityArray);
 
   const values = features.map((f, i) => ({
     naive: naiveResults[i],
@@ -382,7 +357,7 @@ function renderLegend(color, values) {
     ? "Units to build (with substitution)"
     : "Units to build (independent)";
   const modeNote = state.model === "substitution"
-    ? "Same metro-wide total as the independent model, but redistributed toward nearby neighborhoods (within about 0.805 km / 805 meters) where building is easier."
+    ? "Same metro-wide total as the independent model, but redistributed toward neighborhoods where building is easier (per Baum-Snow &amp; Han, 2024)."
     : "Each neighborhood treated as if it had to meet demand entirely on its own, with no spillover to or from nearby areas.";
 
   legend.innerHTML = `
