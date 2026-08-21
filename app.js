@@ -6,6 +6,8 @@
  * Data expected at:
  *   data/nyc_pumas_clean.geojson
  *   data/bayarea_pumas_clean.geojson
+ *   data/nyc_adjacency.json        (produced by compute_adjacency.py)
+ *   data/bayarea_adjacency.json    (produced by compute_adjacency.py)
  *
  * Depends on: d3 v7 (CDN), formulas.js (loaded before this file)
  */
@@ -36,7 +38,7 @@ const state = {
   targetPrice: null,
   sortKey: null,
   sortAsc: false,
-  data: { nyc: null, bayarea: null }, // each holds .features, ._centroids, ._adjacency
+  data: { nyc: null, bayarea: null }, // each holds .features, ._indexAdjacency
 };
 
 const METRIC_FIELD = {
@@ -47,27 +49,38 @@ const METRIC_FIELD = {
 // ------------------------------------------------------------------
 // Data loading
 // ------------------------------------------------------------------
+// Maps a ZIP-code-keyed adjacency object (e.g. {"10002": ["10003","10009"], ...})
+// onto the CURRENT feature array's index order, so solveEquilibriumReallocation
+// can work with plain array indices. Any neighbor ZIP not present in the
+// current feature set (shouldn't normally happen, but guards against it) is
+// silently skipped rather than breaking.
+function buildIndexAdjacency(features, zipAdjacency) {
+  const zipToIndex = {};
+  features.forEach((f, i) => { zipToIndex[String(f.properties.puma_geoid)] = i; });
+  return features.map((f) => {
+    const zip = String(f.properties.puma_geoid);
+    const neighborZips = zipAdjacency[zip] || [];
+    return neighborZips
+      .map((z) => zipToIndex[z])
+      .filter((idx) => idx !== undefined);
+  });
+}
+
 async function loadData() {
   const cacheBust = "?v=" + Date.now();
-  const [nyc, bayarea] = await Promise.all([
+  const [nyc, bayarea, nycAdj, bayareaAdj] = await Promise.all([
     fetch("data/nyc_pumas_clean.geojson" + cacheBust).then((r) => r.json()),
     fetch("data/bayarea_pumas_clean.geojson" + cacheBust).then((r) => r.json()),
+    fetch("data/nyc_adjacency.json" + cacheBust).then((r) => r.ok ? r.json() : null).catch(() => null),
+    fetch("data/bayarea_adjacency.json" + cacheBust).then((r) => r.ok ? r.json() : null).catch(() => null),
   ]);
   applyOverrides(nyc.features);
   applyOverrides(bayarea.features);
   state.data.nyc = nyc;
   state.data.bayarea = bayarea;
 
-  // Precompute each city's neighbor graph (K nearest ZIPs by centroid)
-  // once at load time -- this defines WHO can pass demand to whom, using
-  // d3.geoCentroid on the already-loaded polygon geometry. No new data
-  // file or Python rerun needed. See formulas.js for why this is safe
-  // (doesn't double-count distance the way an earlier, removed version did).
-  [state.data.nyc, state.data.bayarea].forEach((fc) => {
-    if (!fc) return;
-    fc._centroids = fc.features.map((f) => d3.geoCentroid(f));
-    fc._adjacency = buildKNearestNeighbors(fc._centroids);
-  });
+  state.data.nyc._indexAdjacency = nycAdj ? buildIndexAdjacency(nyc.features, nycAdj) : null;
+  state.data.bayarea._indexAdjacency = bayareaAdj ? buildIndexAdjacency(bayarea.features, bayareaAdj) : null;
 }
 
 function currentFeatureCollection() {
@@ -122,7 +135,7 @@ function computeAllValues(features) {
   const elasticityArray = features.map((f) => f.properties.supply_elasticity);
 
   const fc = currentFeatureCollection();
-  const adjacency = fc && fc._adjacency;
+  const adjacency = fc && fc._indexAdjacency;
 
   let reallocated;
   if (adjacency) {
@@ -380,7 +393,7 @@ function renderLegend(color, values) {
     ? "Units to build (with substitution)"
     : "Units to build (independent)";
   const modeNote = state.model === "substitution"
-    ? "Same metro-wide total as the independent model, but redistributed via a recursive neighbor-to-neighbor cascade based on each ZIP's supply elasticity (per Baum-Snow &amp; Han, 2024)."
+    ? "Same metro-wide total as the independent model, but redistributed via a recursive neighbor-to-neighbor cascade over REAL geographic contiguity (per Baum-Snow &amp; Han, 2024)."
     : "Each neighborhood treated as if it had to meet demand entirely on its own, with no spillover to or from nearby areas.";
 
   legend.innerHTML = `
