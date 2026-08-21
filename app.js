@@ -6,9 +6,6 @@
  * Data expected at:
  *   data/nyc_pumas_clean.geojson
  *   data/bayarea_pumas_clean.geojson
- * (produced by get_zip_housing_data.py + build_zip_dataset.py, then
- *  enriched with cbd_distance_km / supply_elasticity by
- *  add_supply_elasticity.py)
  *
  * Depends on: d3 v7 (CDN), formulas.js (loaded before this file)
  */
@@ -35,10 +32,10 @@ function applyOverrides(features) {
 // State
 // ------------------------------------------------------------------
 const state = {
-  city: "nyc",           // "nyc" | "bayarea"
-  metric: "rent",        // "rent" | "price"
-  model: "substitution",  // "independent" | "substitution" -- controls what the MAP visualizes
-  elasticity: -1.0,       // demand elasticity, -1.5 to -0.5, 0.1 steps
+  city: "nyc",
+  metric: "rent",
+  model: "substitution",  // "independent" | "substitution"
+  elasticity: -1.0,
   targetPrice: null,
   sortKey: null,
   sortAsc: false,
@@ -77,10 +74,6 @@ function priceBounds(features, field) {
   return [Math.min(...vals), Math.max(...vals)];
 }
 
-// Returns true only if at least one feature in the current city has a
-// usable (finite) supply_elasticity value -- lets the site degrade
-// gracefully (hide the substitution option) if older, non-enriched data
-// is ever loaded instead of the enriched files.
 function hasSupplyElasticityData(features) {
   return features.some((f) => {
     const v = f.properties.supply_elasticity;
@@ -91,8 +84,6 @@ function hasSupplyElasticityData(features) {
 // ------------------------------------------------------------------
 // Computation
 // ------------------------------------------------------------------
-// Per-feature "independent" (naive) calculation -- unchanged math from
-// the original single-neighborhood model.
 function computeNaive(props) {
   const field = METRIC_FIELD[state.metric];
   const currentPrice = props[field.current];
@@ -106,10 +97,6 @@ function computeNaive(props) {
   return { unitsToBuild, pct, currentPrice, currentUnits };
 }
 
-// Computes BOTH the independent and substitution-adjusted values for
-// every feature in one pass -- the reallocation only makes sense computed
-// across the whole set of features at once (it's a portfolio-level
-// redistribution, not a per-feature formula).
 function computeAllValues(features) {
   const naiveResults = features.map((f) => computeNaive(f.properties));
   const naiveUnitsArray = naiveResults.map((r) => r.unitsToBuild);
@@ -144,6 +131,33 @@ function renderToggle(containerId, options, activeKey, onSelect) {
   });
 }
 
+// FIX: the model toggle now has its OWN dedicated render function, and
+// its onSelect handler calls this function again (not just renderMap/
+// renderTable) so the "active" highlight updates immediately on click --
+// exactly like city-toggle and metric-toggle already did via
+// onCityOrMetricChange() -> refreshControls(). Previously, clicking the
+// model toggle updated state.model and repainted the map/table correctly,
+// but never re-ran the code that assigns the "active" CSS class to the
+// buttons, so the highlight silently never moved.
+function renderModelToggle() {
+  const modelToggleWrap = document.getElementById("model-toggle-wrap");
+  if (hasSupplyElasticityData(currentFeatures())) {
+    modelToggleWrap.style.display = "";
+    renderToggle("model-toggle", [
+      { key: "substitution", label: "With substitution (recommended)" },
+      { key: "independent", label: "Independent neighborhoods" },
+    ], state.model, (key) => {
+      state.model = key;
+      renderModelToggle(); // re-render so the clicked button turns active
+      renderMap();
+      renderTable();
+    });
+  } else {
+    modelToggleWrap.style.display = "none";
+    state.model = "independent";
+  }
+}
+
 function refreshControls() {
   renderToggle("city-toggle", [
     { key: "nyc", label: "New York City" },
@@ -155,19 +169,7 @@ function refreshControls() {
     { key: "price", label: "Home Price" },
   ], state.metric, (key) => { state.metric = key; onCityOrMetricChange(); });
 
-  const modelToggleEl = document.getElementById("model-toggle");
-  const modelToggleWrap = document.getElementById("model-toggle-wrap");
-  if (hasSupplyElasticityData(currentFeatures())) {
-    modelToggleWrap.style.display = "";
-    renderToggle("model-toggle", [
-      { key: "substitution", label: "With substitution (recommended)" },
-      { key: "independent", label: "Independent neighborhoods" },
-    ], state.model, (key) => { state.model = key; renderMap(); renderTable(); });
-  } else {
-    modelToggleWrap.style.display = "none";
-    state.model = "independent";
-  }
-
+  renderModelToggle();
   renderSliders();
 }
 
@@ -311,9 +313,6 @@ function showTooltip(event, feature) {
   const field = METRIC_FIELD[state.metric];
   const naive = computeNaive(props);
 
-  // Recompute the full reallocated set just for this single lookup --
-  // acceptable cost at these dataset sizes (a few hundred features),
-  // keeps this function self-contained for the tooltip.
   const features = currentFeatures();
   const idx = features.findIndex((f) => f.properties.puma_geoid === props.puma_geoid);
   const allValues = computeAllValues(features);
