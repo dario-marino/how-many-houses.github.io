@@ -33,11 +33,15 @@ const state = {
   metric: "rent",
   model: "substitution",  // "independent" | "substitution"
   elasticity: -1.0,        // demand elasticity
-  decayKm: 8,               // spillover/substitution distance decay, km
+  // NOTE: spillover distance is NOT user-adjustable -- it's hardcoded in
+  // formulas.js as SPILLOVER_DECAY_KM (currently 0.805 km = 805 meters).
+  // See that file's header comment for the empirical grounding.
+  // reallocateWithDistanceDecay() falls back to that constant
+  // automatically if no decayKm is passed.
   targetPrice: null,
   sortKey: null,
   sortAsc: false,
-  data: { nyc: null, bayarea: null }, // each holds .features, ._centroids, ._distanceMatrix
+  data: { nyc: null, bayarea: null },
 };
 
 const METRIC_FIELD = {
@@ -59,9 +63,6 @@ async function loadData() {
   state.data.nyc = nyc;
   state.data.bayarea = bayarea;
 
-  // Precompute centroids + pairwise distance matrix once per city, right
-  // after load. This needs no new data file -- centroids are derived
-  // directly from the already-loaded polygon geometry via d3.geoCentroid.
   [state.data.nyc, state.data.bayarea].forEach((fc) => {
     if (!fc) return;
     fc._centroids = fc.features.map((f) => d3.geoCentroid(f));
@@ -108,14 +109,10 @@ function computeNaive(props) {
   return { unitsToBuild, pct, currentPrice, currentUnits };
 }
 
-// Caches the last full computeAllValues() result so showTooltip() (fired
-// on every mousemove) doesn't have to redo the O(n^2) reallocation from
-// scratch on every pixel of mouse movement -- only recomputed when the
-// underlying feature set or any relevant slider actually changes.
 let _valuesCache = { key: null, features: null, values: null };
 
 function computeAllValues(features) {
-  const cacheKey = [state.city, state.metric, state.elasticity, state.targetPrice, state.decayKm].join("|");
+  const cacheKey = [state.city, state.metric, state.elasticity, state.targetPrice].join("|");
   if (_valuesCache.key === cacheKey && _valuesCache.features === features) {
     return _valuesCache.values;
   }
@@ -129,7 +126,9 @@ function computeAllValues(features) {
 
   let reallocated;
   if (distanceMatrix) {
-    reallocated = reallocateWithDistanceDecay(naiveUnitsArray, elasticityArray, distanceMatrix, state.decayKm);
+    // decayKm intentionally omitted -- reallocateWithDistanceDecay() falls
+    // back to the hardcoded SPILLOVER_DECAY_KM constant from formulas.js.
+    reallocated = reallocateWithDistanceDecay(naiveUnitsArray, elasticityArray, distanceMatrix);
   } else {
     reallocated = naiveUnitsArray.map((v) => (v === null || v === undefined || isNaN(v)) ? 0 : Math.max(0, v));
   }
@@ -152,9 +151,6 @@ function activeUnitsValue(computed) {
 // ------------------------------------------------------------------
 // Rendering: controls
 // ------------------------------------------------------------------
-// Each button toggles its OWN "active" class directly and synchronously
-// on click, BEFORE calling onSelect() -- guarantees the visual highlight
-// always updates immediately regardless of anything onSelect() does.
 function renderToggle(containerId, options, activeKey, onSelect) {
   const el = document.getElementById(containerId);
   el.innerHTML = "";
@@ -182,7 +178,6 @@ function renderModelToggle() {
       { key: "independent", label: "Independent neighborhoods" },
     ], state.model, (key) => {
       state.model = key;
-      renderSliders(); // spillover-distance slider only shows in substitution mode
       renderMap();
       renderTable();
     });
@@ -245,29 +240,6 @@ function renderSliders() {
     format: (v) => v.toFixed(1),
     onInput: (v) => { state.elasticity = v; renderMap(); renderTable(); },
   });
-
-  if (state.model === "substitution" && hasSupplyElasticityData(currentFeatures())) {
-    addSlider(container, {
-      label: "Spillover distance (how far substitution reaches)",
-      min: 1,
-      max: 40,
-      step: 1,
-      value: state.decayKm,
-      format: (v) => v + " km",
-      onInput: (v) => { state.decayKm = v; renderMap(); renderTable(); },
-    });
-
-    const spilloverNote = document.createElement("p");
-    spilloverNote.className = "desc";
-    spilloverNote.style.marginTop = "-0.5rem";
-    spilloverNote.innerHTML =
-      "Lower values keep construction concentrated near where demand pressure actually originates " +
-      "(e.g. nearby neighborhoods absorb most of the spillover); higher values spread it further, " +
-      "approaching a metro-wide pool where only supply elasticity -- not distance -- matters. This " +
-      "distance is a user-adjustable modeling choice, not a literature-estimated parameter -- see the " +
-      "methodology note below.";
-    container.appendChild(spilloverNote);
-  }
 
   const note = document.createElement("p");
   note.className = "desc";
@@ -410,7 +382,7 @@ function renderLegend(color, values) {
     ? "Units to build (with substitution)"
     : "Units to build (independent)";
   const modeNote = state.model === "substitution"
-    ? `Same metro-wide total as the independent model, but redistributed toward nearby neighborhoods where building is easier (spillover distance: ${state.decayKm} km).`
+    ? "Same metro-wide total as the independent model, but redistributed toward nearby neighborhoods (within about 0.805 km / 805 meters) where building is easier."
     : "Each neighborhood treated as if it had to meet demand entirely on its own, with no spillover to or from nearby areas.";
 
   legend.innerHTML = `

@@ -9,31 +9,36 @@
  * 2) ORIGIN-DESTINATION SUBSTITUTION / REALLOCATION MODEL
  *    For each ZIP i with a positive independent shortfall S_i, splits S_i
  *    across ALL ZIPs j (including i itself) weighted by:
- *        weight(i,j) = exp(-distance(i,j) / decayKm) * supplyElasticity(j)
+ *        weight(i,j) = exp(-distance(i,j) / SPILLOVER_DECAY_KM) * supplyElasticity(j)
  *    then sums the contributions every destination ZIP receives across
- *    all origins. This directly answers "how does demand pressure spread
- *    between neighborhoods": nearby, easy-to-build ZIPs absorb most of a
- *    given ZIP's excess shortfall, with the amount landing farther away
- *    shrinking geometrically with distance -- rather than pooling every
- *    ZIP's demand into one metro-wide bucket regardless of distance
- *    (which was the behavior of the previous version of this model, and
- *    is recovered here only as the decayKm -> very large limit).
+ *    all origins.
  *
- *    GROUNDING AND ITS LIMITS: the qualitative fact that housing
- *    substitutability decays with distance is well documented (Asquith,
- *    Mast & Reed 2023; Li 2022; Anenberg & Kung 2014; Anenberg & Ringo
- *    2025; reviewed in Furth 2026). However, those studies measure decay
- *    at the scale of individual blocks to roughly a mile -- finer than
- *    the ZIP-to-ZIP distances relevant here (typically several km to
- *    several dozen km). No study directly estimates a decay rate at this
- *    coarser scale, so decayKm is exposed as a user-adjustable parameter
- *    rather than presented as a literature-calibrated constant.
+ *    SPILLOVER_DECAY_KM IS HARDCODED, NOT USER-ADJUSTABLE.
+ *    Value: 0.805 (units: kilometers -- distances from buildDistanceMatrixKm()
+ *    below are computed via the haversine formula using Earth's radius in
+ *    km, so this constant must also be expressed in km to be dimensionally
+ *    consistent). 0.805 km = 805 meters.
+ *
+ *    Source: Anenberg & Ringo (2025), as quoted in Furth (2026, Mercatus
+ *    Center, "Substitutability in the Demand for Housing over Small
+ *    Distances"): "Anenberg and Ringo identify strong search congestion
+ *    effects within 805 meters, falling by a factor of perhaps 3 in the
+ *    ring between 805 and 1,609 meters, and fading gradually to as far as
+ *    16 kilometers." 805 meters (0.805 km) is used directly as the decay
+ *    scale here -- it is the paper's own stated threshold for "strong"
+ *    spillover effects. No study estimates a decay rate at true
+ *    ZIP-to-ZIP scale directly, so this remains the best available anchor
+ *    rather than a precise replication of any single study's intended
+ *    geography.
+ *    Source: https://www.mercatus.org/research/research-papers/substitutability-demand-housing-over-small-distances
  *
  *    Total is exactly preserved: sum of all reallocated units always
- *    equals sum of all (clipped, non-negative) independent-model units,
- *    regardless of decayKm -- only WHERE construction concentrates
- *    changes, never the metro-wide total.
+ *    equals sum of all (clipped, non-negative) independent-model units --
+ *    only WHERE construction concentrates changes, never the metro-wide
+ *    total.
  */
+
+const SPILLOVER_DECAY_KM = 0.805; // = 805 meters
 
 function unitsToReachTargetPrice(currentPrice, currentUnits, targetPrice, epsilon) {
   if (!currentPrice || !currentUnits || currentPrice <= 0 || currentUnits <= 0) return null;
@@ -48,7 +53,9 @@ function pctChange(oldVal, newVal) {
 }
 
 function haversineKm(lat1, lon1, lat2, lon2) {
-  const R = 6371.0;
+  const R = 6371.0; // Earth's radius in KILOMETERS -- output of this
+                     // function is therefore in km, matching the units
+                     // of SPILLOVER_DECAY_KM above.
   const phi1 = lat1 * Math.PI / 180, phi2 = lat2 * Math.PI / 180;
   const dphi = (lat2 - lat1) * Math.PI / 180;
   const dlambda = (lon2 - lon1) * Math.PI / 180;
@@ -71,6 +78,7 @@ function buildDistanceMatrixKm(centroids) {
 }
 
 function reallocateWithDistanceDecay(naiveUnitsArray, elasticityArray, distanceMatrixKm, decayKm) {
+  decayKm = decayKm || SPILLOVER_DECAY_KM;
   const n = naiveUnitsArray.length;
   const clippedNaive = naiveUnitsArray.map((v) => (v === null || v === undefined || isNaN(v)) ? 0 : Math.max(0, v));
   const received = new Array(n).fill(0);
@@ -92,7 +100,7 @@ function reallocateWithDistanceDecay(naiveUnitsArray, elasticityArray, distanceM
     }
 
     if (sumWeights <= 0) {
-      received[i] += S_i; // fallback: no usable weights anywhere, keep it local
+      received[i] += S_i;
       continue;
     }
 
@@ -108,5 +116,6 @@ if (typeof module !== "undefined") {
   module.exports = {
     unitsToReachTargetPrice, pctChange,
     haversineKm, buildDistanceMatrixKm, reallocateWithDistanceDecay,
+    SPILLOVER_DECAY_KM,
   };
 }
