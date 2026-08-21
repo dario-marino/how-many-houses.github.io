@@ -18,6 +18,9 @@
     <div id="city-toggle" class="toggle-group"></div>
     <div id="metric-toggle" class="toggle-group"></div>
   </div>
+  <div class="toggle-row" id="model-toggle-wrap">
+    <div id="model-toggle" class="toggle-group"></div>
+  </div>
 
   <div class="panel">
     <div id="sliders"></div>
@@ -30,7 +33,7 @@
 
   <div class="panel">
     <h2>All neighborhoods (sortable)</h2>
-    <p class="desc">Click any column header to sort.</p>
+    <p class="desc">Click any column header to sort. Both the independent estimate and the substitution-adjusted estimate are shown side by side for comparison.</p>
     <table id="data-table"></table>
   </div>
 
@@ -41,17 +44,48 @@
     parameter (&minus;1.5 to &minus;0.5, spanning estimates in the literature). Set a target price and the
     tool shows how many additional units each ZIP would need to reach it, at your chosen elasticity.
     <br><br>
+    <strong>Accounting for substitution across neighborhoods:</strong> treating every neighborhood as if it
+    had to meet demand entirely on its own overstates how concentrated new construction would really be,
+    since demand can shift toward nearby areas where building is easier. To address this, we draw on
+    Baum-Snow &amp; Han (2024), "The Microgeography of Housing Supply" (<em>Journal of Political Economy</em>),
+    which finds that housing supply elasticity varies systematically within a metro area &mdash; roughly 0.2 near
+    the urban core, rising to about 1.0 halfway to the edge and 1.2 or higher near the periphery. We compute
+    each ZIP's distance to its metro's nearest major job center (Midtown Manhattan for New York; the nearest
+    of San Francisco, Oakland, or San Jose for the Bay Area) and use this relationship to assign each ZIP a
+    supply elasticity. The <strong>same total</strong> metro-wide units-needed figure implied by the
+    independent, neighborhood-by-neighborhood model is then redistributed across ZIPs in proportion to each
+    one's supply elasticity weighted by its own independent shortfall &mdash; so hard-to-build, high-demand
+    areas contribute less new construction than the isolated calculation implies, and easier-to-build areas
+    contribute more, while the metro-wide total stays fixed. Toggle between "independent" and "with
+    substitution" above to see the difference, and both figures are shown side by side in the table below.
+    <br><br>
+    <strong>What this does not claim:</strong> this reallocation does not solve for a new equilibrium price in
+    every neighborhood after construction is redistributed &mdash; that would require modeling how renters
+    actually shift between specific ZIPs as relative prices change (a full cross-neighborhood demand
+    substitution model), which Baum-Snow &amp; Han also estimate (elasticities of substitution of roughly
+    1.5&ndash;3.5 within similar sub-areas and 3.8&ndash;8.8 between more distant areas) but which is not
+    implemented in this tool. This model only answers where a given total construction response would
+    concentrate if supply-side ease of building is what determines the split &mdash; a more realistic starting
+    point than assuming every neighborhood is an island, but still a simplification.
+    <br><br>
+    <strong>On construction costs and building height:</strong> this tool answers "how many units are needed,"
+    not "what they would cost to build" or "what regulatory changes would be required" &mdash; both are
+    outside its scope. For context, however, it's worth noting that the cost of adding housing supply does
+    not rise smoothly with building height, as an early influential study (Glaeser, Gyourko &amp; Saks, 2005)
+    modeled it. More recent work (Cui, 2020, <em>Real Estate Economics</em>) finds the marginal cost of
+    construction instead jumps at specific discontinuities &mdash; roughly an 8% jump around the 4th floor and
+    a much larger jump (near 30% in New York) around the 8th floor, driven by elevator, fire-suppression, and
+    structural requirements &mdash; with cost otherwise flat or even falling in between. This is provided as
+    background only; it does not factor into the unit calculations above.
+    <br><br>
     <strong>Data sources:</strong> price comes from Zillow's ZHVI (home value) and ZORI (rent) indices,
     both updated monthly and based on current listings/asking prices &mdash; not a blend with older,
     long-standing leases. Housing unit counts come from the U.S. Census Bureau's ACS 5-year estimates
-    (2019&ndash;2023), the most current source for unit counts at this geography; unit counts move slowly,
-    so this lag matters less than it would for price. A small number of low-sample ZIP codes are suppressed
-    by Zillow and will show as "n/a."
-    <br><br>
-    This tool does not model cross-neighborhood substitution (e.g. a renter priced out of one ZIP moving to
-    an adjacent one); each ZIP is evaluated independently.
+    (2019&ndash;2023), the most current source for unit counts at this geography. A small number of
+    low-sample ZIP codes are suppressed by Zillow and will show as "n/a."
     <div class="footer-links">
       Data: Zillow Research (ZHVI, ZORI) &amp; U.S. Census Bureau ACS 5-Year Estimates and TIGER/Line ZCTA boundaries.
+      Supply elasticity methodology: Baum-Snow &amp; Han (2024), <em>Journal of Political Economy</em>.
     </div>
   </div>
 </main>
