@@ -1,0 +1,13 @@
+/* Add this small block to the end of your existing style.css --
+   ensures visible spacing between methodology paragraphs (the .caveat
+   div's <p> children need explicit margin, since paragraph spacing
+   isn't guaranteed by every browser/base-stylesheet combination). */
+.caveat p {
+  margin: 0 0 1em 0;
+}
+.caveat p:last-child {
+  margin-bottom: 0;
+}
+.caveat strong {
+  color: var(--text);
+}
