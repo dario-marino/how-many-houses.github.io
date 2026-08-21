@@ -14,9 +14,6 @@
 // HARDCODED FIXES / OVERRIDES
 // ------------------------------------------------------------------
 const NAME_OVERRIDES = {
-  // (currently empty -- ZIP-level names are resolved in the Python
-  // pipeline via a real neighborhood crosswalk; add entries here only
-  // for one-off cosmetic fixes you don't want to wait on a data rerun for)
 };
 
 function applyOverrides(features) {
@@ -35,11 +32,12 @@ const state = {
   city: "nyc",
   metric: "rent",
   model: "substitution",  // "independent" | "substitution"
-  elasticity: -1.0,
+  elasticity: -1.0,        // demand elasticity
+  decayKm: 8,               // spillover/substitution distance decay, km
   targetPrice: null,
   sortKey: null,
   sortAsc: false,
-  data: { nyc: null, bayarea: null },
+  data: { nyc: null, bayarea: null }, // each holds .features, ._centroids, ._distanceMatrix
 };
 
 const METRIC_FIELD = {
@@ -60,10 +58,23 @@ async function loadData() {
   applyOverrides(bayarea.features);
   state.data.nyc = nyc;
   state.data.bayarea = bayarea;
+
+  // Precompute centroids + pairwise distance matrix once per city, right
+  // after load. This needs no new data file -- centroids are derived
+  // directly from the already-loaded polygon geometry via d3.geoCentroid.
+  [state.data.nyc, state.data.bayarea].forEach((fc) => {
+    if (!fc) return;
+    fc._centroids = fc.features.map((f) => d3.geoCentroid(f));
+    fc._distanceMatrix = buildDistanceMatrixKm(fc._centroids);
+  });
+}
+
+function currentFeatureCollection() {
+  return state.data[state.city];
 }
 
 function currentFeatures() {
-  const fc = state.data[state.city];
+  const fc = currentFeatureCollection();
   return fc ? fc.features : [];
 }
 
@@ -97,19 +108,41 @@ function computeNaive(props) {
   return { unitsToBuild, pct, currentPrice, currentUnits };
 }
 
+// Caches the last full computeAllValues() result so showTooltip() (fired
+// on every mousemove) doesn't have to redo the O(n^2) reallocation from
+// scratch on every pixel of mouse movement -- only recomputed when the
+// underlying feature set or any relevant slider actually changes.
+let _valuesCache = { key: null, features: null, values: null };
+
 function computeAllValues(features) {
+  const cacheKey = [state.city, state.metric, state.elasticity, state.targetPrice, state.decayKm].join("|");
+  if (_valuesCache.key === cacheKey && _valuesCache.features === features) {
+    return _valuesCache.values;
+  }
+
   const naiveResults = features.map((f) => computeNaive(f.properties));
   const naiveUnitsArray = naiveResults.map((r) => r.unitsToBuild);
   const elasticityArray = features.map((f) => f.properties.supply_elasticity);
 
-  const reallocated = reallocateBySupplyElasticity(naiveUnitsArray, elasticityArray);
+  const fc = currentFeatureCollection();
+  const distanceMatrix = fc && fc._distanceMatrix;
 
-  return features.map((f, i) => ({
+  let reallocated;
+  if (distanceMatrix) {
+    reallocated = reallocateWithDistanceDecay(naiveUnitsArray, elasticityArray, distanceMatrix, state.decayKm);
+  } else {
+    reallocated = naiveUnitsArray.map((v) => (v === null || v === undefined || isNaN(v)) ? 0 : Math.max(0, v));
+  }
+
+  const values = features.map((f, i) => ({
     naive: naiveResults[i],
     reallocatedUnits: reallocated[i],
     supplyElasticity: f.properties.supply_elasticity,
     cbdDistanceKm: f.properties.cbd_distance_km,
   }));
+
+  _valuesCache = { key: cacheKey, features, values };
+  return values;
 }
 
 function activeUnitsValue(computed) {
@@ -119,26 +152,27 @@ function activeUnitsValue(computed) {
 // ------------------------------------------------------------------
 // Rendering: controls
 // ------------------------------------------------------------------
+// Each button toggles its OWN "active" class directly and synchronously
+// on click, BEFORE calling onSelect() -- guarantees the visual highlight
+// always updates immediately regardless of anything onSelect() does.
 function renderToggle(containerId, options, activeKey, onSelect) {
   const el = document.getElementById(containerId);
   el.innerHTML = "";
+  const buttons = [];
   options.forEach(({ key, label }) => {
     const btn = document.createElement("button");
     btn.textContent = label;
     btn.className = key === activeKey ? "active" : "";
-    btn.onclick = () => onSelect(key);
+    btn.onclick = () => {
+      buttons.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      onSelect(key);
+    };
+    buttons.push(btn);
     el.appendChild(btn);
   });
 }
 
-// FIX: the model toggle now has its OWN dedicated render function, and
-// its onSelect handler calls this function again (not just renderMap/
-// renderTable) so the "active" highlight updates immediately on click --
-// exactly like city-toggle and metric-toggle already did via
-// onCityOrMetricChange() -> refreshControls(). Previously, clicking the
-// model toggle updated state.model and repainted the map/table correctly,
-// but never re-ran the code that assigns the "active" CSS class to the
-// buttons, so the highlight silently never moved.
 function renderModelToggle() {
   const modelToggleWrap = document.getElementById("model-toggle-wrap");
   if (hasSupplyElasticityData(currentFeatures())) {
@@ -148,7 +182,7 @@ function renderModelToggle() {
       { key: "independent", label: "Independent neighborhoods" },
     ], state.model, (key) => {
       state.model = key;
-      renderModelToggle(); // re-render so the clicked button turns active
+      renderSliders(); // spillover-distance slider only shows in substitution mode
       renderMap();
       renderTable();
     });
@@ -211,6 +245,29 @@ function renderSliders() {
     format: (v) => v.toFixed(1),
     onInput: (v) => { state.elasticity = v; renderMap(); renderTable(); },
   });
+
+  if (state.model === "substitution" && hasSupplyElasticityData(currentFeatures())) {
+    addSlider(container, {
+      label: "Spillover distance (how far substitution reaches)",
+      min: 1,
+      max: 40,
+      step: 1,
+      value: state.decayKm,
+      format: (v) => v + " km",
+      onInput: (v) => { state.decayKm = v; renderMap(); renderTable(); },
+    });
+
+    const spilloverNote = document.createElement("p");
+    spilloverNote.className = "desc";
+    spilloverNote.style.marginTop = "-0.5rem";
+    spilloverNote.innerHTML =
+      "Lower values keep construction concentrated near where demand pressure actually originates " +
+      "(e.g. nearby neighborhoods absorb most of the spillover); higher values spread it further, " +
+      "approaching a metro-wide pool where only supply elasticity -- not distance -- matters. This " +
+      "distance is a user-adjustable modeling choice, not a literature-estimated parameter -- see the " +
+      "methodology note below.";
+    container.appendChild(spilloverNote);
+  }
 
   const note = document.createElement("p");
   note.className = "desc";
@@ -353,7 +410,7 @@ function renderLegend(color, values) {
     ? "Units to build (with substitution)"
     : "Units to build (independent)";
   const modeNote = state.model === "substitution"
-    ? "Same metro-wide total as the independent model, but redistributed toward neighborhoods where building is easier (per Baum-Snow &amp; Han, 2024)."
+    ? `Same metro-wide total as the independent model, but redistributed toward nearby neighborhoods where building is easier (spillover distance: ${state.decayKm} km).`
     : "Each neighborhood treated as if it had to meet demand entirely on its own, with no spillover to or from nearby areas.";
 
   legend.innerHTML = `
