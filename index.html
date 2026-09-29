@@ -6,6 +6,17 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
+
+<!-- Google Analytics (GA4) -- Measurement ID for the "How Many Houses"
+     data stream (https://dario-marino.github.io/how-many-houses.github.io/) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-HT4SGL874D"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-HT4SGL874D');
+</script>
+
 <title>How Many Houses? | NYC &amp; Bay Area Neighborhood Housing Explorer</title>
 <link rel="stylesheet" href="style.css">
 <script>
@@ -14,12 +25,10 @@ MathJax = { tex: { inlineMath: [['$', '$']], displayMath: [['$$', '$$']] } };
 <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
 </head>
 <body>
-
 <header>
   <h1>How Many Houses?</h1>
   <p class="subtitle">A neighborhood-level companion to the article, New York City &amp; the Bay Area, by ZIP code</p>
 </header>
-
 <main>
   <div class="toggle-row">
     <div id="city-toggle" class="toggle-group"></div>
@@ -28,57 +37,41 @@ MathJax = { tex: { inlineMath: [['$', '$']], displayMath: [['$$', '$$']] } };
   <div class="toggle-row" id="model-toggle-wrap">
     <div id="model-toggle" class="toggle-group"></div>
   </div>
-
   <div class="panel">
     <div id="sliders"></div>
-
     <div class="viz-row">
       <div id="map-container"></div>
       <div id="legend"></div>
     </div>
   </div>
-
   <div class="intro">
     <p><strong>What this tool does.</strong> Housing in New York City and the San Francisco Bay Area is expensive largely because there are not enough homes to go around. This tool lets you pick a target price, a rent or a home value you'd like all neighborhoods to reach, and estimates how many additional homes would need to be built to get there.</p>
-
     <p><strong>Elasticity.</strong> When more homes are built, prices tend to fall, but exactly how much they fall depends on how sensitive demand is to price, a quantity economists call the <em>elasticity of demand</em>. If demand is very price sensitive, then cutting the price even a little draws in a lot of additional would be residents, so you need to build a lot of homes to actually bring the price down and keep it down because more people will move in. If demand is less price sensitive, the same price cut requires fewer new homes. Because there is no single agreed upon value, you can adjust it with a slider (from -1.5, more sensitive, to -0.5, less sensitive), a range consistent with published estimates, so you can see how much the answer depends on that assumption. If you think many people want to move to NYC the more the price goes down you can drag it down to -1.5, but you will need more houses to reach that target price.</p>
-
     <p><strong>Two views.</strong> The "independent" view treats each neighborhood on its own. How many homes would <em>that</em> neighborhood need to hit the target price, ignoring everywhere else? The "with substitution" view is more realistic. It recognizes that not all of that construction would actually happen in the priciest, most built up neighborhoods, some of it would spill over to nearby areas where it's physically and legally easier to build. Both views always add up to the same city wide total number of homes, they differ only in <em>where</em> those homes are assumed to go.</p>
   </div>
-
   <div class="panel">
     <h2>All neighborhoods (sortable)</h2>
     <p class="desc">Click any column header to sort. Both the independent estimate and the substitution-adjusted estimate are shown side by side for comparison.</p>
     <table id="data-table"></table>
-
     <div class="col-explainer">
       <p><strong>"Units to build (independent)"</strong> is the number of additional homes that one ZIP code would need on its own to reach the target price you've set, calculated purely from that ZIP's current price, its current number of homes, and the demand-elasticity value on the slider. It assumes each neighborhood is an island &mdash; every neighborhood's number is computed as if nothing were built anywhere else.</p>
-
       <p><strong>"Units to build (with substitution)"</strong> takes that same city-wide total and redistributes it toward the neighborhoods where adding homes is actually easier. "Easier to build" here is not our subjective judgment &mdash; it is measured by a neighborhood's <em>housing supply elasticity</em>, which is how readily its housing stock grows when there's pressure to add homes. Dense, central, highly built-up areas (the core of Manhattan, downtown San Francisco) have low supply elasticity: land is scarce and expensive, lots are hard to assemble, and zoning and construction constraints bind hardest there. Outer, less-dense areas have higher supply elasticity: there is more room and fewer binding constraints. Following the economics literature (Baum-Snow &amp; Han, 2024), we approximate each ZIP's supply elasticity from how far it sits from its metro's main job center &mdash; roughly 0.2 right at the core, rising to about 1.0 halfway out and 1.2 or more near the edge. The "with substitution" numbers therefore shift construction away from the hardest-to-build core and toward the more build-able periphery, while keeping the city-wide total fixed.</p>
     </div>
   </div>
-
   <div class="caveat">
     <p><strong>Methodology:</strong> for each ZIP code (ZCTA) in New York City and the 9 county Bay Area, we start from a current market price and current total housing units, then fit a constant-elasticity demand curve through that single observed point using an adjustable elasticity parameter (&minus;1.5 to &minus;0.5, spanning estimates in the literature). Set a target price and the tool shows how many additional units each ZIP would need to reach it, at your chosen elasticity:</p>
     <p>$$\text{Price}_{\text{new}} = \text{Price}_{\text{old}} \times \left(\frac{Q_{\text{new}}}{Q_{\text{old}}}\right)^{1/\varepsilon}$$</p>
-
     <p><strong>Accounting for substitution across neighborhoods:</strong> treating every neighborhood as if it had to meet demand entirely on its own overstates how concentrated new construction would really be, since demand can shift toward nearby areas where building is easier. To address this, we draw on Baum-Snow &amp; Han (2024), "The Microgeography of Housing Supply" (Journal of Political Economy), which finds that housing supply elasticity varies systematically within a metro area, roughly 0.2 near the urban core, rising to about 1.0 halfway to the edge and 1.2 or higher near the periphery. We compute each ZIP's distance to its metro's nearest major job center (Midtown Manhattan for New York, the nearest of San Francisco, Oakland, or San Jose for the Bay Area) and use this relationship to assign each ZIP a supply elasticity. The same total metro wide units needed figure implied by the independent, neighborhood by neighborhood model is then redistributed across ZIPs in proportion to each one's supply elasticity weighted by its own independent shortfall. Hard to build, high demand areas contribute less new construction than the isolated calculation implies, and easier to build areas contribute more, while the metro wide total stays fixed. Toggle between "independent" and "with substitution" above to see the difference, and both figures are shown side by side in the table above.</p>
-
     <p><strong>The reallocation formula, precisely:</strong> for every ZIP $i$:</p>
     <p>$$\text{weight}_i = S_i \times e_i$$</p>
     <p>where $S_i$ is that ZIP's own <strong>independent/naive shortfall</strong> (from the price-elasticity formula above) and $e_i$ is its <strong>supply elasticity</strong> (from the Baum-Snow &amp; Han distance-to-job-center curve described above). Then the <strong>entire metro-wide total</strong> gets redistributed proportionally to each ZIP's share of the combined weight:</p>
     <p>$$\text{final allocation}_i = \left(\sum_j S_j\right) \times \frac{\text{weight}_i}{\sum_j \text{weight}_j} = \left(\sum_j S_j\right) \times \frac{S_i \times e_i}{\sum_j (S_j \times e_j)}$$</p>
-
     <p><strong>This reallocation does not solve for a new equilibrium price in every neighborhood after construction is redistributed:</strong> That would require modeling how renters actually shift between specific ZIPs as relative prices change (a full cross-neighborhood demand substitution model). This model only answers where a given total construction response would concentrate if supply side ease of building is what determines the split, a more realistic starting point than assuming every neighborhood is an island, but still a simplification, every model is wrong some models are useful.</p>
-
     <p><strong>This tool answers:</strong> "how many units are needed," not "what they would cost to build" or "what regulatory changes would be required". For context, it's worth noting that the cost of adding housing supply does not rise smoothly with building height, as an early study (Glaeser, Gyourko &amp; Saks, 2005) modeled it. More recent work (Cui, 2020, Real Estate Economics) finds the marginal cost of construction instead jumps at specific discontinuities, roughly an 8% jump around the 4th floor and a much larger jump (near 30% in New York) around the 8th floor, driven by elevator, fire-suppression, and structural requirements with cost otherwise flat or even falling in between.</p>
-
     <p><strong>Data sources:</strong> price comes from Zillow's ZHVI (home value) and ZORI (rent) indices, both updated monthly and based on current listings/asking prices. Housing unit counts come from the U.S. Census Bureau's ACS 5 year estimates (2019&ndash;2023), the most current source for unit counts at this geography. A small number of low sample ZIP codes are suppressed by Zillow and will show as n/a.</p>
   </div>
 </main>
-
 <div id="tooltip"></div>
-
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script src="formulas.js?v=20260821i"></script>
 <script src="app.js?v=20260821i"></script>
